@@ -104,14 +104,14 @@ public class OpenAiSummaryService : IAiSummaryService
 
         try
         {
-            var prompt = $@"Summarize this webpage in 1-2 concise sentences that describe what the page is about and why someone might visit it.
+            var prompt = $@"Generate a compressed summary using key phrases and technical terms. Focus on main topics, technologies, concepts, and features. Keep it 30-40 words. Use keywords that someone would search for. Avoid filler like 'this webpage provides', 'learn how to', 'information about'.
 
 Title: {title}
 URL: {url}
 Content:
 {content}
 
-Summary:";
+Compressed Summary:";
 
             var chatCompletion = await _chatClient.CompleteChatAsync(prompt);
 

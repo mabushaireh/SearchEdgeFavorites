@@ -18,7 +18,7 @@ public class WebScraperService
     public WebScraperService()
     {
         _httpClient = new HttpClient();
-        _httpClient.Timeout = TimeSpan.FromSeconds(10);
+        _httpClient.Timeout = TimeSpan.FromSeconds(ConfigurationService.Instance.HttpTimeoutSeconds);
         _httpClient.DefaultRequestHeaders.Add("User-Agent", 
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
     }
@@ -58,7 +58,8 @@ public class WebScraperService
             }
 
             var contentBuilder = new StringBuilder();
-            foreach (var node in contentNodes.Take(20)) // Limit to first 20 paragraphs
+            var maxParagraphs = ConfigurationService.Instance.MaxParagraphs;
+            foreach (var node in contentNodes.Take(maxParagraphs))
             {
                 var text = node.InnerText?.Trim();
                 if (!string.IsNullOrWhiteSpace(text) && text.Length > 20)
@@ -69,10 +70,11 @@ public class WebScraperService
 
             var content = contentBuilder.ToString().Trim();
 
-            // Limit content size for AI processing (max 4000 characters)
-            if (content.Length > 4000)
+            // Limit content size for AI processing
+            var maxContentChars = ConfigurationService.Instance.MaxContentCharacters;
+            if (content.Length > maxContentChars)
             {
-                content = content.Substring(0, 4000) + "...";
+                content = content.Substring(0, maxContentChars) + "...";
             }
 
             return (title, content);

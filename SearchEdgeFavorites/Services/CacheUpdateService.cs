@@ -50,16 +50,17 @@ public class CacheUpdateService
                 "SearchEdgeFavorites",
                 "debug.log");
 
+            var targetSummaries = ConfigurationService.Instance.MaxAiSummariesPerSession;
+            var maxAttempts = ConfigurationService.Instance.MaxScrapingAttempts;
+
             File.AppendAllText(logPath, 
                 $"\n{DateTime.Now:yyyy-MM-dd HH:mm:ss} - Starting cache update for {favorites.Count} favorites\n");
             File.AppendAllText(logPath, 
-                $"  Note: Will attempt to generate 5 AI summaries per session (rate limiting)\n");
+                $"  Note: Will attempt to generate {targetSummaries} AI summaries per session (rate limiting)\n");
 
-            // Process favorites until we get 5 successful AI summarizations
+            // Process favorites until we get target successful AI summarizations
             var successfulAiCalls = 0;
             var processedCount = 0;
-            const int targetSummaries = 5;
-            const int maxAttempts = 400; // Increased limit to handle many corporate URLs
 
             foreach (var favorite in favorites)
             {
@@ -75,9 +76,10 @@ public class CacheUpdateService
                 {
                     var cached = _databaseService.GetCachedFavorite(favorite.Url);
 
-                    // Skip if already summarized within last 7 days
+                    // Skip if already summarized within configured expiry period
+                    var cacheExpiryDays = ConfigurationService.Instance.CacheExpiryDays;
                     if (cached != null && cached.IsSummarized && 
-                        (DateTime.Now - cached.LastUpdated).TotalDays < 7)
+                        (DateTime.Now - cached.LastUpdated).TotalDays < cacheExpiryDays)
                     {
                         continue;
                     }
@@ -140,7 +142,8 @@ public class CacheUpdateService
                     }
 
                     // Delay to respect rate limits
-                    await Task.Delay(2000);
+                    var delayMs = ConfigurationService.Instance.DelayBetweenRequestsMs;
+                    await Task.Delay(delayMs);
                 }
                 catch (Exception ex)
                 {
