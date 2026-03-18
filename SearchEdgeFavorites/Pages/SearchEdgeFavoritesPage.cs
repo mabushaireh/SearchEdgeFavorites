@@ -17,14 +17,22 @@ namespace SearchEdgeFavorites;
 internal sealed partial class SearchEdgeFavoritesPage : ListPage
 {
     private readonly EdgeFavoritesService _favoritesService;
+    private readonly DatabaseService _databaseService;
+    private readonly CacheUpdateService _cacheUpdateService;
 
     public SearchEdgeFavoritesPage()
     {
         Icon = IconHelpers.FromRelativePath("Assets\\StoreLogo.png");
-        Title = "Edge Favorites";
+        Title = "Edge Favorites AI ??";
         Name = "Open";
-        PlaceholderText = "Search favorites...";
+        PlaceholderText = "?? Search your favorites with AI descriptions...";
+
         _favoritesService = new EdgeFavoritesService();
+        _databaseService = new DatabaseService();
+
+        var webScraperService = new WebScraperService();
+        var aiSummaryService = new UnifiedAiService();
+        _cacheUpdateService = new CacheUpdateService(_databaseService, webScraperService, aiSummaryService);
     }
 
     public override IListItem[] GetItems()
@@ -42,15 +50,30 @@ internal sealed partial class SearchEdgeFavoritesPage : ListPage
             ];
         }
 
-        return favorites.Select(fav => new ListItem(new OpenUrlCommand(fav.Url))
+        // Queue uncached URLs for background processing
+        _cacheUpdateService.QueueUrlsForProcessing(favorites);
+
+        return favorites.Select(fav =>
         {
-            Title = fav.Name,
-            Subtitle = fav.Url
+            // Check if we have a cached description
+            var cached = _databaseService.GetCachedFavorite(fav.Url);
+
+            var subtitle = fav.Url;
+            if (cached != null && !string.IsNullOrEmpty(cached.AiDescription))
+            {
+                subtitle = $"?? {cached.AiDescription}";
+            }
+
+            return new ListItem(new OpenUrlCommand(fav.Url))
+            {
+                Title = fav.Name,
+                Subtitle = subtitle
+            };
         }).ToArray();
     }
 }
 
-internal class OpenUrlCommand : ICommand
+internal class OpenUrlCommand : InvokableCommand
 {
     private readonly string _url;
 
@@ -61,41 +84,19 @@ internal class OpenUrlCommand : ICommand
         Name = "Open URL";
     }
 
-    public string Id { get; }
-    public string Name { get; }
-    public IIconInfo? Icon => null;
-
-    public event TypedEventHandler<object, IPropChangedEventArgs>? PropChanged;
-
-    public void Invoke()
+    public override ICommandResult Invoke()
     {
         var logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), 
-            "SearchEdgeFavorites", "debug.log");
+            "SearchEdgeFavorites", "url_open.log");
 
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
-            File.AppendAllText(logPath, $"\n{DateTime.Now:yyyy-MM-dd HH:mm:ss} - Attempting to open URL: {_url}\n");
+            File.AppendAllText(logPath, $"\n{DateTime.Now:HH:mm:ss} - Opening: {_url}\n");
 
-            // Method 1: Windows.System.Launcher
+            // Method 1: cmd.exe start (most reliable)
             try
             {
-                var uri = new Uri(_url);
-                File.AppendAllText(logPath, $"  Method 1: Windows.System.Launcher with URI: {uri.AbsoluteUri}\n");
-                var task = Launcher.LaunchUriAsync(uri).AsTask();
-                task.Wait();
-                File.AppendAllText(logPath, $"  Method 1: SUCCESS\n");
-                return;
-            }
-            catch (Exception ex1)
-            {
-                File.AppendAllText(logPath, $"  Method 1 FAILED: {ex1.GetType().Name} - {ex1.Message}\n");
-            }
-
-            // Method 2: cmd.exe /c start
-            try
-            {
-                File.AppendAllText(logPath, $"  Method 2: cmd.exe /c start\n");
                 var psi = new ProcessStartInfo
                 {
                     FileName = "cmd.exe",
@@ -104,40 +105,37 @@ internal class OpenUrlCommand : ICommand
                     CreateNoWindow = true
                 };
                 var process = Process.Start(psi);
-                File.AppendAllText(logPath, $"  Method 2: Process started - {process?.Id}\n");
-                return;
+                File.AppendAllText(logPath, $"  ? Opened via cmd.exe\n");
+                return CommandResult.KeepOpen();
             }
-            catch (Exception ex2)
+            catch (Exception ex)
             {
-                File.AppendAllText(logPath, $"  Method 2 FAILED: {ex2.GetType().Name} - {ex2.Message}\n");
+                File.AppendAllText(logPath, $"  ? cmd.exe failed: {ex.Message}\n");
             }
 
-            // Method 3: Direct Process.Start
+            // Method 2: Direct shell execute
             try
             {
-                File.AppendAllText(logPath, $"  Method 3: Direct Process.Start\n");
                 var process = Process.Start(new ProcessStartInfo
                 {
                     FileName = _url,
                     UseShellExecute = true
                 });
-                File.AppendAllText(logPath, $"  Method 3: SUCCESS - {process?.Id}\n");
+                File.AppendAllText(logPath, $"  ? Opened via ShellExecute\n");
+                return CommandResult.KeepOpen();
             }
-            catch (Exception ex3)
+            catch (Exception ex)
             {
-                File.AppendAllText(logPath, $"  Method 3 FAILED: {ex3.GetType().Name} - {ex3.Message}\n");
+                File.AppendAllText(logPath, $"  ? ShellExecute failed: {ex.Message}\n");
             }
+
+            File.AppendAllText(logPath, $"  ? ALL METHODS FAILED\n");
         }
         catch (Exception ex)
         {
-            try
-            {
-                File.AppendAllText(logPath, $"CRITICAL ERROR: {ex.GetType().Name} - {ex.Message}\n{ex.StackTrace}\n");
-            }
-            catch
-            {
-                // Can't even log - fail silently
-            }
+            try { File.AppendAllText(logPath, $"  CRITICAL: {ex.Message}\n"); } catch { }
         }
+
+        return CommandResult.KeepOpen();
     }
 }

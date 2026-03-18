@@ -42,6 +42,12 @@
     <PackageReference Include="Microsoft.Windows.CsWinRT" />
     <PackageReference Include="Shmuelie.WinRTServer" />
 
+    <!-- Database and AI packages -->
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="HtmlAgilityPack" />
+    <PackageReference Include="OpenAI" />
+    <PackageReference Include="DotnetGeminiSDK" />
+
     <!-- Needed to enable building an MSIX package -->
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools.MSIX">
       <PrivateAssets>all</PrivateAssets>

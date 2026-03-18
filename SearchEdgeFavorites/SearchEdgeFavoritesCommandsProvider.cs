@@ -13,7 +13,7 @@ public partial class SearchEdgeFavoritesCommandsProvider : CommandProvider
 
     public SearchEdgeFavoritesCommandsProvider()
     {
-        DisplayName = "Edge Favorites";
+        DisplayName = "Edge Favorites AI 🤖";
         Icon = IconHelpers.FromRelativePath("Assets\\StoreLogo.png");
         _commands = [
             new CommandItem(new SearchEdgeFavoritesPage()) { Title = DisplayName },
