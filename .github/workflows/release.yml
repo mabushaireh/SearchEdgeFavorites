@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    strategy:
+      matrix:
+        platform: [x64, arm64]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore SearchEdgeFavorites/SearchEdgeFavorites.csproj
+
+      - name: Build and Publish
+        run: |
+          dotnet publish SearchEdgeFavorites/SearchEdgeFavorites.csproj `
+            -c Release `
+            -r win-${{ matrix.platform }} `
+            --self-contained true `
+            -p:PublishSingleFile=false `
+            -p:Platform=${{ matrix.platform }} `
+            -o ./publish/win-${{ matrix.platform }}
+
+      - name: Create ZIP archive
+        run: |
+          Compress-Archive -Path ./publish/win-${{ matrix.platform }}/* `
+            -DestinationPath SearchEdgeFavorites-win-${{ matrix.platform }}.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SearchEdgeFavorites-win-${{ matrix.platform }}
+          path: SearchEdgeFavorites-win-${{ matrix.platform }}.zip
+
+  create-release:
+    needs: build-and-release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            ./artifacts/SearchEdgeFavorites-win-x64/SearchEdgeFavorites-win-x64.zip
+            ./artifacts/SearchEdgeFavorites-win-arm64/SearchEdgeFavorites-win-arm64.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
