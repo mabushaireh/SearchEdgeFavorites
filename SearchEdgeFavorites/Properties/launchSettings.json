@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "SearchEdgeFavorites (Package)": {
+      "commandName": "MsixPackage",
+      "doNotLaunchApp": true
+    },
+    "SearchEdgeFavorites (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
