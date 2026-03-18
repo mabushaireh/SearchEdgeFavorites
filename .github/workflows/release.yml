@@ -5,13 +5,17 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   build-and-release:
     runs-on: windows-latest
 
     strategy:
       matrix:
-        platform: [x64, arm64]
+        platform: [x64, ARM64]
+        configuration: [Release]
 
     steps:
       - name: Checkout code
@@ -22,17 +26,25 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
+      - name: Install Windows App SDK workload
+        run: dotnet workload install maui-windows
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
       - name: Restore dependencies
         run: dotnet restore SearchEdgeFavorites/SearchEdgeFavorites.csproj
 
       - name: Build and Publish
         run: |
           dotnet publish SearchEdgeFavorites/SearchEdgeFavorites.csproj `
-            -c Release `
+            -c ${{ matrix.configuration }} `
             -r win-${{ matrix.platform }} `
             --self-contained true `
-            -p:PublishSingleFile=false `
             -p:Platform=${{ matrix.platform }} `
+            -p:RuntimeIdentifierOverride=win-${{ matrix.platform }} `
+            -p:WindowsPackageType=None `
+            -p:WindowsAppSDKSelfContained=true `
             -o ./publish/win-${{ matrix.platform }}
 
       - name: Create ZIP archive
@@ -64,7 +76,7 @@ jobs:
         with:
           files: |
             ./artifacts/SearchEdgeFavorites-win-x64/SearchEdgeFavorites-win-x64.zip
-            ./artifacts/SearchEdgeFavorites-win-arm64/SearchEdgeFavorites-win-arm64.zip
+            ./artifacts/SearchEdgeFavorites-win-ARM64/SearchEdgeFavorites-win-ARM64.zip
           generate_release_notes: true
           draft: false
           prerelease: false
