@@ -3,6 +3,7 @@
 // See the LICENSE file in the project root for more information.
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -38,22 +39,30 @@ internal sealed partial class SearchEdgeFavoritesPage : ListPage
     public override IListItem[] GetItems()
     {
         var favorites = _favoritesService.GetFavorites();
+        var items = new List<IListItem>();
+
+        // Always add Sync Favorites option at the top
+        items.Add(new ListItem(new SyncFavoritesCommand())
+        {
+            Title = "?? Sync Favorites",
+            Subtitle = "Clean DB of deleted favorites & remove dead bookmarks from Edge"
+        });
 
         if (!favorites.Any())
         {
-            return [
-                new ListItem(new NoOpCommand()) 
-                { 
-                    Title = "No favorites found",
-                    Subtitle = "Make sure Microsoft Edge has bookmarks saved" 
-                }
-            ];
+            items.Add(new ListItem(new NoOpCommand()) 
+            { 
+                Title = "No favorites found",
+                Subtitle = "Make sure Microsoft Edge has bookmarks saved" 
+            });
+            return items.ToArray();
         }
 
         // Queue uncached URLs for background processing
         _cacheUpdateService.QueueUrlsForProcessing(favorites);
 
-        return favorites.Select(fav =>
+        // Add all favorite items
+        foreach (var fav in favorites)
         {
             // Check if we have a cached description
             var cached = _databaseService.GetCachedFavorite(fav.Url);
@@ -64,12 +73,14 @@ internal sealed partial class SearchEdgeFavoritesPage : ListPage
                 subtitle = $"?? {cached.AiDescription}";
             }
 
-            return new ListItem(new OpenUrlCommand(fav.Url))
+            items.Add(new ListItem(new OpenUrlCommand(fav.Url))
             {
                 Title = fav.Name,
                 Subtitle = subtitle
-            };
-        }).ToArray();
+            });
+        }
+
+        return items.ToArray();
     }
 }
 
@@ -137,5 +148,72 @@ internal class OpenUrlCommand : InvokableCommand
         }
 
         return CommandResult.KeepOpen();
+    }
+}
+
+internal class SyncFavoritesCommand : InvokableCommand
+{
+    public SyncFavoritesCommand()
+    {
+        Id = "sync-favorites";
+        Name = "Sync Favorites";
+    }
+
+    public override ICommandResult Invoke()
+    {
+        var logPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SearchEdgeFavorites",
+            "sync_result.log");
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+
+            File.AppendAllText(logPath, $"\n{'=',-80}\n");
+            File.AppendAllText(logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - Starting Sync...\n");
+            File.AppendAllText(logPath, $"{'=',-80}\n");
+
+            var edgeService = new EdgeFavoritesService();
+            var dbService = new DatabaseService();
+            var syncService = new FavoritesSyncService(edgeService, dbService);
+
+            var (removedFromDb, removedFromFavorites, log) = syncService.SyncFavorites();
+
+            // Write result to log
+            var result = $"\n{DateTime.Now:yyyy-MM-dd HH:mm:ss} - Sync completed!\n" +
+                        $"• Removed from database: {removedFromDb}\n" +
+                        $"• Removed from favorites: {removedFromFavorites}\n\n";
+
+            File.AppendAllText(logPath, result);
+            File.AppendAllText(logPath, "Check sync.log for full details.\n");
+
+            // Open the log file
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = logPath,
+                UseShellExecute = true
+            });
+
+            return CommandResult.KeepOpen();
+        }
+        catch (Exception ex)
+        {
+            File.AppendAllText(logPath, $"\n{DateTime.Now:yyyy-MM-dd HH:mm:ss} - Sync failed: {ex.Message}\n");
+            File.AppendAllText(logPath, $"Stack: {ex.StackTrace}\n");
+
+            // Still try to open the log
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = logPath,
+                    UseShellExecute = true
+                });
+            }
+            catch { }
+
+            return CommandResult.KeepOpen();
+        }
     }
 }

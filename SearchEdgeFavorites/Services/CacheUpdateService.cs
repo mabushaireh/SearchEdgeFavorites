@@ -50,45 +50,121 @@ public class CacheUpdateService
                 "SearchEdgeFavorites",
                 "debug.log");
 
+            Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+
             var targetSummaries = ConfigurationService.Instance.MaxAiSummariesPerSession;
             var maxAttempts = ConfigurationService.Instance.MaxScrapingAttempts;
 
             File.AppendAllText(logPath, 
-                $"\n{DateTime.Now:yyyy-MM-dd HH:mm:ss} - Starting cache update for {favorites.Count} favorites\n");
+                $"\n{'=',-80}\n");
             File.AppendAllText(logPath, 
-                $"  Note: Will attempt to generate {targetSummaries} AI summaries per session (rate limiting)\n");
+                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - SESSION START: Cache Update\n");
+            File.AppendAllText(logPath, 
+                $"{'=',-80}\n");
+            File.AppendAllText(logPath, 
+                $"Configuration:\n");
+            File.AppendAllText(logPath, 
+                $"  - Total favorites to process: {favorites.Count}\n");
+            File.AppendAllText(logPath, 
+                $"  - Target AI summaries per session: {targetSummaries}\n");
+            File.AppendAllText(logPath, 
+                $"  - Max scraping attempts: {maxAttempts}\n");
+            File.AppendAllText(logPath, 
+                $"  - HTTP timeout: {ConfigurationService.Instance.HttpTimeoutSeconds}s\n");
+            File.AppendAllText(logPath, 
+                $"  - Delay between requests: {ConfigurationService.Instance.DelayBetweenRequestsMs}ms\n");
+            File.AppendAllText(logPath, 
+                $"  - Cache expiry: {ConfigurationService.Instance.CacheExpiryDays} days\n");
+            File.AppendAllText(logPath, 
+                $"  - AI Provider: {ConfigurationService.Instance.GetConfigValue("AI_PROVIDER", "openai")}\n");
+            File.AppendAllText(logPath, 
+                $"\n");
 
             // Process favorites until we get target successful AI summarizations
             var successfulAiCalls = 0;
-            var processedCount = 0;
+            var attemptedFetches = 0;
+            var skippedCount = 0;
 
             foreach (var favorite in favorites)
             {
                 // Stop if we've reached our target or max attempts
-                if (successfulAiCalls >= targetSummaries || processedCount >= maxAttempts)
+                if (successfulAiCalls >= targetSummaries || attemptedFetches >= maxAttempts)
                 {
                     break;
                 }
 
-                processedCount++;
-
                 try
                 {
                     var cached = _databaseService.GetCachedFavorite(favorite.Url);
+
+                    // Skip if already marked as dead
+                    if (cached != null && cached.IsDead)
+                    {
+                        skippedCount++;
+                        File.AppendAllText(logPath, 
+                            $"  [Skipped] Dead page (HTTP {cached.HttpStatusCode}): {favorite.Url}\n");
+                        continue;
+                    }
 
                     // Skip if already summarized within configured expiry period
                     var cacheExpiryDays = ConfigurationService.Instance.CacheExpiryDays;
                     if (cached != null && cached.IsSummarized && 
                         (DateTime.Now - cached.LastUpdated).TotalDays < cacheExpiryDays)
                     {
+                        skippedCount++;
                         continue;
                     }
 
+                    // Now we're actually going to attempt a fetch - increment counter
+                    attemptedFetches++;
+
                     File.AppendAllText(logPath, 
-                        $"  [{processedCount}] Processing: {favorite.Url}\n");
+                        $"  [Attempt #{attemptedFetches}] Processing: {favorite.Url}\n");
 
                     // Fetch page content
-                    var (title, content) = await _webScraperService.FetchPageContentAsync(favorite.Url);
+                    var (title, content, statusCode) = await _webScraperService.FetchPageContentAsync(favorite.Url);
+
+                    // Handle 404 Not Found - mark as dead
+                    if (statusCode == 404)
+                    {
+                        File.AppendAllText(logPath, 
+                            $"      ☠ Page not found (404) - marking as DEAD and will skip in future sessions\n");
+
+                        var deadCache = new FavoriteCache
+                        {
+                            Url = favorite.Url,
+                            Title = favorite.Name,
+                            AiDescription = "Page not found (404)",
+                            PageContent = string.Empty,
+                            LastUpdated = DateTime.Now,
+                            IsSummarized = false,
+                            IsDead = true,
+                            HttpStatusCode = 404
+                        };
+                        _databaseService.UpsertCache(deadCache);
+                        continue; // Don't count toward AI call limit
+                    }
+
+                    // Handle other HTTP errors (401, 403, 500, etc.)
+                    if (statusCode.HasValue && (statusCode < 200 || statusCode >= 300))
+                    {
+                        File.AppendAllText(logPath, 
+                            $"      HTTP Error {statusCode} - caching without summary\n");
+
+                        var errorCache = new FavoriteCache
+                        {
+                            Url = favorite.Url,
+                            Title = favorite.Name,
+                            AiDescription = $"HTTP Error {statusCode}",
+                            PageContent = string.Empty,
+                            LastUpdated = DateTime.Now,
+                            IsSummarized = false,
+                            IsDead = false, // Don't mark as dead - might be temporary
+                            HttpStatusCode = statusCode
+                        };
+                        _databaseService.UpsertCache(errorCache);
+                        continue; // Don't count toward AI call limit
+                    }
 
                     if (string.IsNullOrEmpty(content))
                     {
@@ -103,7 +179,9 @@ public class CacheUpdateService
                             AiDescription = string.Empty,
                             PageContent = string.Empty,
                             LastUpdated = DateTime.Now,
-                            IsSummarized = false
+                            IsSummarized = false,
+                            IsDead = false,
+                            HttpStatusCode = statusCode
                         };
                         _databaseService.UpsertCache(emptyCache);
                         continue; // Don't count toward AI call limit
@@ -123,7 +201,9 @@ public class CacheUpdateService
                         AiDescription = summary,
                         PageContent = content.Length > 1000 ? content.Substring(0, 1000) : content,
                         LastUpdated = DateTime.Now,
-                        IsSummarized = !string.IsNullOrEmpty(summary)
+                        IsSummarized = !string.IsNullOrEmpty(summary),
+                        IsDead = false,
+                        HttpStatusCode = statusCode
                     };
 
                     _databaseService.UpsertCache(cache);
@@ -154,12 +234,27 @@ public class CacheUpdateService
 
             var totalCached = _databaseService.GetUnsummarizedUrls(1000).Count;
             var remaining = favorites.Count - totalCached;
+
             File.AppendAllText(logPath, 
-                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - Cache update completed\n");
+                $"\n{'=',-80}\n");
             File.AppendAllText(logPath, 
-                $"  Processed {processedCount} URLs, generated {successfulAiCalls} AI summaries\n");
+                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - SESSION END: Cache Update Completed\n");
             File.AppendAllText(logPath, 
-                $"  Total cached so far: {totalCached}/{favorites.Count} ({remaining} remaining)\n");
+                $"{'=',-80}\n");
+            File.AppendAllText(logPath, 
+                $"Summary:\n");
+            File.AppendAllText(logPath, 
+                $"  - URLs attempted: {attemptedFetches}\n");
+            File.AppendAllText(logPath, 
+                $"  - URLs skipped (cached/dead): {skippedCount}\n");
+            File.AppendAllText(logPath, 
+                $"  - AI summaries generated: {successfulAiCalls}\n");
+            File.AppendAllText(logPath, 
+                $"  - Total cached: {totalCached}/{favorites.Count}\n");
+            File.AppendAllText(logPath, 
+                $"  - Remaining unsummarized: {remaining}\n");
+            File.AppendAllText(logPath, 
+                $"{'=',-80}\n\n");
         }
         catch (Exception ex)
         {

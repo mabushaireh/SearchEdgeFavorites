@@ -30,6 +30,8 @@ public class ConfigurationService
     // Cache Settings
     public int CacheExpiryDays { get; private set; } = 7;
 
+    private readonly Dictionary<string, string> _rawConfig = new();
+
     private ConfigurationService()
     {
         _configPath = Path.Combine(
@@ -38,6 +40,11 @@ public class ConfigurationService
             "config.txt");
 
         LoadConfiguration();
+    }
+
+    public string GetConfigValue(string key, string defaultValue = "")
+    {
+        return _rawConfig.TryGetValue(key.ToUpperInvariant(), out var value) ? value : defaultValue;
     }
 
     private void LoadConfiguration()
@@ -66,6 +73,9 @@ public class ConfigurationService
 
                 var key = parts[0].Trim().ToUpperInvariant();
                 var value = parts[1].Trim();
+
+                // Store raw config for logging
+                _rawConfig[key] = value;
 
                 switch (key)
                 {

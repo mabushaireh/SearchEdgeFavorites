@@ -69,4 +69,6 @@ public class FavoriteCache
     public string PageContent { get; set; } = string.Empty;
     public DateTime LastUpdated { get; set; }
     public bool IsSummarized { get; set; }
+    public bool IsDead { get; set; }
+    public int? HttpStatusCode { get; set; }
 }
