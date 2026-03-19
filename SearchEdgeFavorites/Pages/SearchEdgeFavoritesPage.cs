@@ -26,9 +26,9 @@ internal sealed partial class SearchEdgeFavoritesPage : ListPage
     public SearchEdgeFavoritesPage()
     {
         Icon = IconHelpers.FromRelativePath("Assets\\StoreLogo.png");
-        Title = "Edge Favorites AI ??";
+        Title = "Edge Favorites AI";
         Name = "Open";
-        PlaceholderText = "?? Search your favorites with AI descriptions...";
+        PlaceholderText = "Search your favorites with AI descriptions...";
 
         _favoritesService = new EdgeFavoritesService();
         _databaseService = new DatabaseService();
@@ -80,7 +80,7 @@ internal sealed partial class SearchEdgeFavoritesPage : ListPage
             var subtitle = fav.Url;
             if (cached != null && !string.IsNullOrEmpty(cached.AiDescription))
             {
-                subtitle = $"?? {cached.AiDescription}";
+                subtitle = cached.AiDescription;
             }
 
             // Try to get favicon
