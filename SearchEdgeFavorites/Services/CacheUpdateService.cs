@@ -143,6 +143,7 @@ public class CacheUpdateService
                         {
                             Url = favorite.Url,
                             Title = favorite.Name,
+                            Path = favorite.Path,
                             AiDescription = "Page not found (404)",
                             PageContent = string.Empty,
                             LastUpdated = DateTime.Now,
@@ -166,6 +167,7 @@ public class CacheUpdateService
                         {
                             Url = favorite.Url,
                             Title = favorite.Name,
+                            Path = favorite.Path,
                             AiDescription = failureReason,
                             PageContent = string.Empty,
                             LastUpdated = DateTime.Now,
@@ -189,6 +191,7 @@ public class CacheUpdateService
                         {
                             Url = favorite.Url,
                             Title = favorite.Name,
+                            Path = favorite.Path,
                             AiDescription = $"HTTP Error {statusCode}",
                             PageContent = string.Empty,
                             LastUpdated = DateTime.Now,
@@ -212,6 +215,7 @@ public class CacheUpdateService
                         {
                             Url = favorite.Url,
                             Title = favorite.Name,
+                            Path = favorite.Path,
                             AiDescription = string.Empty,
                             PageContent = string.Empty,
                             LastUpdated = DateTime.Now,
@@ -236,6 +240,7 @@ public class CacheUpdateService
                     {
                         Url = favorite.Url,
                         Title = !string.IsNullOrEmpty(title) ? title : favorite.Name,
+                        Path = favorite.Path,
                         AiDescription = summary,
                         PageContent = content.Length > 1000 ? content.Substring(0, 1000) : content,
                         LastUpdated = DateTime.Now,

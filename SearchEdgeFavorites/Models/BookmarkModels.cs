@@ -65,6 +65,7 @@ public class FavoriteCache
     public int Id { get; set; }
     public string Url { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
+    public string Path { get; set; } = string.Empty;
     public string AiDescription { get; set; } = string.Empty;
     public string PageContent { get; set; } = string.Empty;
     public DateTime LastUpdated { get; set; }

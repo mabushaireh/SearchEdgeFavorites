@@ -188,11 +188,12 @@ public class FavoritesSyncService
             }
 
             cmd.CommandText = @"
-                INSERT INTO FavoriteCache (Url, Title, AiDescription, PageContent, LastUpdated, IsSummarized, IsDead, HttpStatusCode, IsPermanentlyFailed, FailureReason)
-                VALUES (@url, @title, @description, @content, @updated, @summarized, @dead, @statusCode, @permanentlyFailed, @failureReason)";
+                INSERT INTO FavoriteCache (Url, Title, Path, AiDescription, PageContent, LastUpdated, IsSummarized, IsDead, HttpStatusCode, IsPermanentlyFailed, FailureReason)
+                VALUES (@url, @title, @path, @description, @content, @updated, @summarized, @dead, @statusCode, @permanentlyFailed, @failureReason)";
 
             cmd.Parameters.AddWithValue("@url", favorite.Url);
             cmd.Parameters.AddWithValue("@title", favorite.Name);
+            cmd.Parameters.AddWithValue("@path", favorite.Path);
             cmd.Parameters.AddWithValue("@description", string.Empty);
             cmd.Parameters.AddWithValue("@content", string.Empty);
             cmd.Parameters.AddWithValue("@updated", DateTime.Now.ToString("o"));

@@ -92,6 +92,17 @@ public class DatabaseService : IDisposable
             // Column already exists
         }
 
+        try
+        {
+            var alterCmd5 = _connection.CreateCommand();
+            alterCmd5.CommandText = "ALTER TABLE FavoriteCache ADD COLUMN Path TEXT";
+            alterCmd5.ExecuteNonQuery();
+        }
+        catch
+        {
+            // Column already exists
+        }
+
         // Create index on URL for fast lookups
         var createIndexCmd = _connection.CreateCommand();
         createIndexCmd.CommandText = @"
@@ -107,7 +118,7 @@ public class DatabaseService : IDisposable
 
             var cmd = _connection.CreateCommand();
             cmd.CommandText = @"
-                SELECT Id, Url, Title, AiDescription, PageContent, LastUpdated, IsSummarized, IsDead, HttpStatusCode, IsPermanentlyFailed, FailureReason
+                SELECT Id, Url, Title, Path, AiDescription, PageContent, LastUpdated, IsSummarized, IsDead, HttpStatusCode, IsPermanentlyFailed, FailureReason
                 FROM FavoriteCache 
                 WHERE Url = @url";
             cmd.Parameters.AddWithValue("@url", url);
@@ -120,14 +131,15 @@ public class DatabaseService : IDisposable
                     Id = reader.GetInt32(0),
                     Url = reader.GetString(1),
                     Title = reader.GetString(2),
-                    AiDescription = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
-                    PageContent = reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
-                    LastUpdated = DateTime.Parse(reader.GetString(5)),
-                    IsSummarized = reader.GetInt32(6) == 1,
-                    IsDead = reader.IsDBNull(7) ? false : reader.GetInt32(7) == 1,
-                    HttpStatusCode = reader.IsDBNull(8) ? null : reader.GetInt32(8),
-                    IsPermanentlyFailed = reader.IsDBNull(9) ? false : reader.GetInt32(9) == 1,
-                    FailureReason = reader.IsDBNull(10) ? string.Empty : reader.GetString(10)
+                    Path = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
+                    AiDescription = reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
+                    PageContent = reader.IsDBNull(5) ? string.Empty : reader.GetString(5),
+                    LastUpdated = DateTime.Parse(reader.GetString(6)),
+                    IsSummarized = reader.GetInt32(7) == 1,
+                    IsDead = reader.IsDBNull(8) ? false : reader.GetInt32(8) == 1,
+                    HttpStatusCode = reader.IsDBNull(9) ? null : reader.GetInt32(9),
+                    IsPermanentlyFailed = reader.IsDBNull(10) ? false : reader.GetInt32(10) == 1,
+                    FailureReason = reader.IsDBNull(11) ? string.Empty : reader.GetString(11)
                 };
             }
         }
@@ -147,10 +159,11 @@ public class DatabaseService : IDisposable
 
             var cmd = _connection.CreateCommand();
             cmd.CommandText = @"
-                INSERT INTO FavoriteCache (Url, Title, AiDescription, PageContent, LastUpdated, IsSummarized, IsDead, HttpStatusCode, IsPermanentlyFailed, FailureReason)
-                VALUES (@url, @title, @description, @content, @updated, @summarized, @dead, @statusCode, @permanentlyFailed, @failureReason)
+                INSERT INTO FavoriteCache (Url, Title, Path, AiDescription, PageContent, LastUpdated, IsSummarized, IsDead, HttpStatusCode, IsPermanentlyFailed, FailureReason)
+                VALUES (@url, @title, @path, @description, @content, @updated, @summarized, @dead, @statusCode, @permanentlyFailed, @failureReason)
                 ON CONFLICT(Url) DO UPDATE SET
                     Title = @title,
+                    Path = @path,
                     AiDescription = @description,
                     PageContent = @content,
                     LastUpdated = @updated,
@@ -162,6 +175,7 @@ public class DatabaseService : IDisposable
 
             cmd.Parameters.AddWithValue("@url", cache.Url);
             cmd.Parameters.AddWithValue("@title", cache.Title);
+            cmd.Parameters.AddWithValue("@path", cache.Path ?? string.Empty);
             cmd.Parameters.AddWithValue("@description", cache.AiDescription ?? string.Empty);
             cmd.Parameters.AddWithValue("@content", cache.PageContent ?? string.Empty);
             cmd.Parameters.AddWithValue("@updated", cache.LastUpdated.ToString("o"));
