@@ -106,6 +106,15 @@ public class CacheUpdateService
                         continue;
                     }
 
+                    // Skip if already marked as permanently failed
+                    if (cached != null && cached.IsPermanentlyFailed)
+                    {
+                        skippedCount++;
+                        File.AppendAllText(logPath, 
+                            $"  [Skipped] Permanently failed ({cached.FailureReason}): {favorite.Url}\n");
+                        continue;
+                    }
+
                     // Skip if already summarized within configured expiry period
                     var cacheExpiryDays = ConfigurationService.Instance.CacheExpiryDays;
                     if (cached != null && cached.IsSummarized && 
@@ -122,7 +131,7 @@ public class CacheUpdateService
                         $"  [Attempt #{attemptedFetches}] Processing: {favorite.Url}\n");
 
                     // Fetch page content
-                    var (title, content, statusCode) = await _webScraperService.FetchPageContentAsync(favorite.Url);
+                    var (title, content, statusCode, failureReason) = await _webScraperService.FetchPageContentAsync(favorite.Url);
 
                     // Handle 404 Not Found - mark as dead
                     if (statusCode == 404)
@@ -139,17 +148,42 @@ public class CacheUpdateService
                             LastUpdated = DateTime.Now,
                             IsSummarized = false,
                             IsDead = true,
-                            HttpStatusCode = 404
+                            HttpStatusCode = 404,
+                            IsPermanentlyFailed = false,
+                            FailureReason = string.Empty
                         };
                         _databaseService.UpsertCache(deadCache);
                         continue; // Don't count toward AI call limit
                     }
 
-                    // Handle other HTTP errors (401, 403, 500, etc.)
+                    // Check for permanent failures (authentication, DNS errors)
+                    if (!string.IsNullOrEmpty(failureReason))
+                    {
+                        File.AppendAllText(logPath, 
+                            $"      🚫 PERMANENT FAILURE - {failureReason} - will skip in future sessions\n");
+
+                        var permanentFailCache = new FavoriteCache
+                        {
+                            Url = favorite.Url,
+                            Title = favorite.Name,
+                            AiDescription = failureReason,
+                            PageContent = string.Empty,
+                            LastUpdated = DateTime.Now,
+                            IsSummarized = false,
+                            IsDead = false,
+                            HttpStatusCode = statusCode,
+                            IsPermanentlyFailed = true,
+                            FailureReason = failureReason
+                        };
+                        _databaseService.UpsertCache(permanentFailCache);
+                        continue; // Don't count toward AI call limit
+                    }
+
+                    // Handle other HTTP errors (500, etc.) - temporary errors
                     if (statusCode.HasValue && (statusCode < 200 || statusCode >= 300))
                     {
                         File.AppendAllText(logPath, 
-                            $"      HTTP Error {statusCode} - caching without summary\n");
+                            $"      HTTP Error {statusCode} - caching without summary (may be temporary)\n");
 
                         var errorCache = new FavoriteCache
                         {
@@ -159,8 +193,10 @@ public class CacheUpdateService
                             PageContent = string.Empty,
                             LastUpdated = DateTime.Now,
                             IsSummarized = false,
-                            IsDead = false, // Don't mark as dead - might be temporary
-                            HttpStatusCode = statusCode
+                            IsDead = false,
+                            HttpStatusCode = statusCode,
+                            IsPermanentlyFailed = false,
+                            FailureReason = string.Empty
                         };
                         _databaseService.UpsertCache(errorCache);
                         continue; // Don't count toward AI call limit
@@ -169,7 +205,7 @@ public class CacheUpdateService
                     if (string.IsNullOrEmpty(content))
                     {
                         File.AppendAllText(logPath, 
-                            $"      Failed to fetch content (may require authentication) - trying next URL\n");
+                            $"      Failed to fetch content - trying next URL\n");
 
                         // Cache the favorite even without content so we don't keep retrying
                         var emptyCache = new FavoriteCache
@@ -181,7 +217,9 @@ public class CacheUpdateService
                             LastUpdated = DateTime.Now,
                             IsSummarized = false,
                             IsDead = false,
-                            HttpStatusCode = statusCode
+                            HttpStatusCode = statusCode,
+                            IsPermanentlyFailed = false,
+                            FailureReason = string.Empty
                         };
                         _databaseService.UpsertCache(emptyCache);
                         continue; // Don't count toward AI call limit
@@ -203,7 +241,9 @@ public class CacheUpdateService
                         LastUpdated = DateTime.Now,
                         IsSummarized = !string.IsNullOrEmpty(summary),
                         IsDead = false,
-                        HttpStatusCode = statusCode
+                        HttpStatusCode = statusCode,
+                        IsPermanentlyFailed = false,
+                        FailureReason = string.Empty
                     };
 
                     _databaseService.UpsertCache(cache);

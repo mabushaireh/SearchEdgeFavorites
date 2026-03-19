@@ -181,11 +181,15 @@ public class FavoritesSyncService
         try
         {
             var cmd = _databaseService.CreateCommand();
-            if (cmd == null) return false;
+            if (cmd == null)
+            {
+                LogToDebug($"AddFavoriteToDatabase FAILED - cmd is null for: {favorite.Url}");
+                return false;
+            }
 
             cmd.CommandText = @"
-                INSERT INTO FavoriteCache (Url, Title, AiDescription, PageContent, LastUpdated, IsSummarized, IsDead, HttpStatusCode)
-                VALUES (@url, @title, @description, @content, @updated, @summarized, @dead, @statusCode)";
+                INSERT INTO FavoriteCache (Url, Title, AiDescription, PageContent, LastUpdated, IsSummarized, IsDead, HttpStatusCode, IsPermanentlyFailed, FailureReason)
+                VALUES (@url, @title, @description, @content, @updated, @summarized, @dead, @statusCode, @permanentlyFailed, @failureReason)";
 
             cmd.Parameters.AddWithValue("@url", favorite.Url);
             cmd.Parameters.AddWithValue("@title", favorite.Name);
@@ -195,13 +199,17 @@ public class FavoritesSyncService
             cmd.Parameters.AddWithValue("@summarized", 0);
             cmd.Parameters.AddWithValue("@dead", 0);
             cmd.Parameters.AddWithValue("@statusCode", DBNull.Value);
+            cmd.Parameters.AddWithValue("@permanentlyFailed", 0);
+            cmd.Parameters.AddWithValue("@failureReason", string.Empty);
 
             cmd.ExecuteNonQuery();
+            LogToDebug($"AddFavoriteToDatabase SUCCESS: {favorite.Url}");
             return true;
         }
         catch (Exception ex)
         {
-            LogToDebug($"Error adding to database: {ex.Message}");
+            LogToDebug($"AddFavoriteToDatabase ERROR for {favorite.Url}: {ex.Message}");
+            LogToDebug($"Stack trace: {ex.StackTrace}");
             return false;
         }
     }
@@ -269,6 +277,42 @@ public class FavoritesSyncService
         }
 
         return deadUrls;
+    }
+
+    private List<(string Url, string FailureReason, int? StatusCode)> GetPermanentlyFailedUrls()
+    {
+        var permanentlyFailedUrls = new List<(string Url, string FailureReason, int? StatusCode)>();
+        try
+        {
+            var cmd = _databaseService.CreateCommand();
+            if (cmd == null)
+            {
+                LogToDebug("GetPermanentlyFailedUrls: Database command is null");
+                return permanentlyFailedUrls;
+            }
+
+            cmd.CommandText = "SELECT Url, FailureReason, HttpStatusCode FROM FavoriteCache WHERE IsPermanentlyFailed = 1";
+
+            LogToDebug($"Executing query: {cmd.CommandText}");
+
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                var url = reader.GetString(0);
+                var failureReason = reader.IsDBNull(1) ? "Unknown reason" : reader.GetString(1);
+                var statusCode = reader.IsDBNull(2) ? (int?)null : reader.GetInt32(2);
+                permanentlyFailedUrls.Add((url, failureReason, statusCode));
+                LogToDebug($"Found permanently failed URL: {url} - {failureReason}");
+            }
+
+            LogToDebug($"Total permanently failed URLs found: {permanentlyFailedUrls.Count}");
+        }
+        catch (Exception ex)
+        {
+            LogToDebug($"Error in GetPermanentlyFailedUrls: {ex.Message}");
+        }
+
+        return permanentlyFailedUrls;
     }
 
     private void LogToDebug(string message)
@@ -441,6 +485,223 @@ public class FavoritesSyncService
         }
 
         return removedCount;
+    }
+
+    public string CheckConsistency()
+    {
+        var report = new System.Text.StringBuilder();
+        
+        try
+        {
+            report.AppendLine("=".PadRight(70, '='));
+            report.AppendLine($"CONSISTENCY CHECK REPORT - {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            report.AppendLine("=".PadRight(70, '='));
+            report.AppendLine();
+
+            // Step 1: Get current favorites from Edge
+            var currentFavorites = _edgeFavoritesService.GetFavorites();
+            var currentUrls = new HashSet<string>(currentFavorites.Select(f => f.Url));
+            
+            report.AppendLine($"📂 Edge Favorites Count: {currentFavorites.Count}");
+
+            // Step 2: Get all cached URLs from DB
+            var allCachedUrls = GetAllCachedUrls();
+            var cachedUrlSet = new HashSet<string>(allCachedUrls);
+            
+            report.AppendLine($"💾 Database Records Count: {allCachedUrls.Count}");
+            report.AppendLine();
+
+            // Step 3: Check for URLs in DB but NOT in favorites (orphaned records)
+            var orphanedUrls = allCachedUrls.Where(url => !currentUrls.Contains(url)).ToList();
+            report.AppendLine("─".PadRight(70, '─'));
+            report.AppendLine($"🔍 ORPHANED DATABASE RECORDS (in DB but NOT in Edge): {orphanedUrls.Count}");
+            report.AppendLine("─".PadRight(70, '─'));
+            
+            if (orphanedUrls.Count > 0)
+            {
+                foreach (var url in orphanedUrls.Take(20))
+                {
+                    report.AppendLine($"  • {url}");
+                }
+                if (orphanedUrls.Count > 20)
+                {
+                    report.AppendLine($"  ... and {orphanedUrls.Count - 20} more");
+                }
+            }
+            else
+            {
+                report.AppendLine("  ✓ No orphaned records found");
+            }
+            report.AppendLine();
+
+            // Step 4: Check for URLs in favorites but NOT in DB (missing records)
+            var missingUrls = currentFavorites.Where(f => !cachedUrlSet.Contains(f.Url)).ToList();
+            report.AppendLine("─".PadRight(70, '─'));
+            report.AppendLine($"➕ MISSING DATABASE RECORDS (in Edge but NOT in DB): {missingUrls.Count}");
+            report.AppendLine("─".PadRight(70, '─'));
+            
+            if (missingUrls.Count > 0)
+            {
+                foreach (var fav in missingUrls.Take(20))
+                {
+                    report.AppendLine($"  • {fav.Name}");
+                    report.AppendLine($"    URL: {fav.Url}");
+                    report.AppendLine($"    Path: {fav.Path}");
+                }
+                if (missingUrls.Count > 20)
+                {
+                    report.AppendLine($"  ... and {missingUrls.Count - 20} more");
+                }
+            }
+            else
+            {
+                report.AppendLine("  ✓ All favorites are in database");
+            }
+            report.AppendLine();
+
+            // Step 5: Check for dead URLs marked in DB
+            var deadUrls = GetDeadUrls();
+            report.AppendLine("─".PadRight(70, '─'));
+            report.AppendLine($"☠️  DEAD LINKS IN DATABASE: {deadUrls.Count}");
+            report.AppendLine("─".PadRight(70, '─'));
+            
+            if (deadUrls.Count > 0)
+            {
+                foreach (var (url, statusCode) in deadUrls.Take(20))
+                {
+                    var isInFavorites = currentUrls.Contains(url) ? "Still in Edge" : "Already removed";
+                    report.AppendLine($"  • HTTP {statusCode} - {url}");
+                    report.AppendLine($"    Status: {isInFavorites}");
+                }
+                if (deadUrls.Count > 20)
+                {
+                    report.AppendLine($"  ... and {deadUrls.Count - 20} more");
+                }
+            }
+            else
+            {
+                report.AppendLine("  ✓ No dead links found");
+            }
+            report.AppendLine();
+
+            // Step 5b: Check for permanently failed URLs (authentication/network errors)
+            var permanentlyFailedUrls = GetPermanentlyFailedUrls();
+            report.AppendLine("─".PadRight(70, '─'));
+            report.AppendLine($"🚫 PERMANENTLY FAILED (Auth/Network Issues): {permanentlyFailedUrls.Count}");
+            report.AppendLine("─".PadRight(70, '─'));
+
+            if (permanentlyFailedUrls.Count > 0)
+            {
+                foreach (var (url, reason, statusCode) in permanentlyFailedUrls.Take(20))
+                {
+                    var isInFavorites = currentUrls.Contains(url) ? "Still in Edge" : "Already removed";
+                    var status = statusCode.HasValue ? $"HTTP {statusCode}" : "Network Error";
+                    report.AppendLine($"  • {status} - {url}");
+                    report.AppendLine($"    Reason: {reason}");
+                    report.AppendLine($"    Status: {isInFavorites}");
+                }
+                if (permanentlyFailedUrls.Count > 20)
+                {
+                    report.AppendLine($"  ... and {permanentlyFailedUrls.Count - 20} more");
+                }
+            }
+            else
+            {
+                report.AppendLine("  ✓ No permanently failed URLs found");
+            }
+            report.AppendLine();
+
+            // Step 6: Get summary statistics from DB
+            var stats = GetDatabaseStats();
+            report.AppendLine("─".PadRight(70, '─'));
+            report.AppendLine("📊 DATABASE STATISTICS");
+            report.AppendLine("─".PadRight(70, '─'));
+            report.AppendLine($"  Total Records: {stats.TotalRecords}");
+            report.AppendLine($"  Summarized: {stats.Summarized} ({(stats.TotalRecords > 0 ? (stats.Summarized * 100.0 / stats.TotalRecords):0):F1}%)");
+            report.AppendLine($"  Not Summarized: {stats.NotSummarized} ({(stats.TotalRecords > 0 ? (stats.NotSummarized * 100.0 / stats.TotalRecords):0):F1}%)");
+            report.AppendLine($"  Dead Links: {stats.DeadLinks} ({(stats.TotalRecords > 0 ? (stats.DeadLinks * 100.0 / stats.TotalRecords):0):F1}%)");
+            report.AppendLine($"  Permanently Failed: {stats.PermanentlyFailed} ({(stats.TotalRecords > 0 ? (stats.PermanentlyFailed * 100.0 / stats.TotalRecords):0):F1}%)");
+            report.AppendLine();
+
+            // Step 7: Overall consistency status
+            report.AppendLine("=".PadRight(70, '='));
+            report.AppendLine("📋 CONSISTENCY STATUS");
+            report.AppendLine("=".PadRight(70, '='));
+
+            var totalIssues = orphanedUrls.Count + missingUrls.Count;
+
+            if (totalIssues == 0 && deadUrls.Count == 0 && permanentlyFailedUrls.Count == 0)
+            {
+                report.AppendLine("✅ PERFECTLY IN SYNC - No issues found!");
+            }
+            else if (totalIssues == 0)
+            {
+                report.AppendLine($"⚠️  MOSTLY IN SYNC - {deadUrls.Count} dead link(s) and {permanentlyFailedUrls.Count} permanently failed to review");
+            }
+            else
+            {
+                report.AppendLine($"❌ OUT OF SYNC - {totalIssues} issue(s) found:");
+                if (orphanedUrls.Count > 0)
+                    report.AppendLine($"   • {orphanedUrls.Count} orphaned database record(s)");
+                if (missingUrls.Count > 0)
+                    report.AppendLine($"   • {missingUrls.Count} favorite(s) missing from database");
+                if (deadUrls.Count > 0)
+                    report.AppendLine($"   • {deadUrls.Count} dead link(s) to review");
+                if (permanentlyFailedUrls.Count > 0)
+                    report.AppendLine($"   • {permanentlyFailedUrls.Count} permanently failed URL(s) (auth/network issues)");
+                report.AppendLine();
+                report.AppendLine("💡 Recommendation: Run SyncFavorites() to fix these issues");
+            }
+            
+            report.AppendLine("=".PadRight(70, '='));
+
+            // Write to log file
+            WriteToLogFile(report.ToString());
+        }
+        catch (Exception ex)
+        {
+            report.AppendLine();
+            report.AppendLine($"❌ ERROR during consistency check: {ex.Message}");
+            report.AppendLine($"Stack Trace: {ex.StackTrace}");
+        }
+
+        return report.ToString();
+    }
+
+    private (int TotalRecords, int Summarized, int NotSummarized, int DeadLinks, int PermanentlyFailed) GetDatabaseStats()
+    {
+        try
+        {
+            var cmd = _databaseService.CreateCommand();
+            if (cmd == null) return (0, 0, 0, 0, 0);
+
+            cmd.CommandText = @"
+                SELECT 
+                    COUNT(*) as Total,
+                    SUM(CASE WHEN IsSummarized = 1 THEN 1 ELSE 0 END) as Summarized,
+                    SUM(CASE WHEN IsSummarized = 0 THEN 1 ELSE 0 END) as NotSummarized,
+                    SUM(CASE WHEN IsDead = 1 THEN 1 ELSE 0 END) as DeadLinks,
+                    SUM(CASE WHEN IsPermanentlyFailed = 1 THEN 1 ELSE 0 END) as PermanentlyFailed
+                FROM FavoriteCache";
+
+            using var reader = cmd.ExecuteReader();
+            if (reader.Read())
+            {
+                return (
+                    reader.GetInt32(0),
+                    reader.GetInt32(1),
+                    reader.GetInt32(2),
+                    reader.GetInt32(3),
+                    reader.GetInt32(4)
+                );
+            }
+        }
+        catch (Exception ex)
+        {
+            LogToDebug($"Error in GetDatabaseStats: {ex.Message}");
+        }
+
+        return (0, 0, 0, 0, 0);
     }
 
     private void WriteToLogFile(string content)

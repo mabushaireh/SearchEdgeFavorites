@@ -71,4 +71,6 @@ public class FavoriteCache
     public bool IsSummarized { get; set; }
     public bool IsDead { get; set; }
     public int? HttpStatusCode { get; set; }
+    public bool IsPermanentlyFailed { get; set; }
+    public string FailureReason { get; set; } = string.Empty;
 }

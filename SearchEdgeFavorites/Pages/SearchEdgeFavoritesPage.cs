@@ -10,6 +10,7 @@ using System.Linq;
 using Microsoft.CommandPalette.Extensions;
 using Microsoft.CommandPalette.Extensions.Toolkit;
 using SearchEdgeFavorites.Services;
+using SearchEdgeFavorites.Helpers;
 using Windows.Foundation;
 using Windows.System;
 
@@ -20,6 +21,7 @@ internal sealed partial class SearchEdgeFavoritesPage : ListPage
     private readonly EdgeFavoritesService _favoritesService;
     private readonly DatabaseService _databaseService;
     private readonly CacheUpdateService _cacheUpdateService;
+    private readonly FaviconService _faviconService;
 
     public SearchEdgeFavoritesPage()
     {
@@ -30,6 +32,7 @@ internal sealed partial class SearchEdgeFavoritesPage : ListPage
 
         _favoritesService = new EdgeFavoritesService();
         _databaseService = new DatabaseService();
+        _faviconService = new FaviconService();
 
         var webScraperService = new WebScraperService();
         var aiSummaryService = new UnifiedAiService();
@@ -44,10 +47,17 @@ internal sealed partial class SearchEdgeFavoritesPage : ListPage
         // Always add Sync Favorites option at the top
         items.Add(new ListItem(new SyncFavoritesCommand())
         {
-            Title = "?? Sync Favorites",
-            Subtitle = "Clean DB of deleted favorites & remove dead bookmarks from Edge"
+            Title = "Sync Favorites",
+            Subtitle = "Clean DB of deleted favorites & remove dead bookmarks from Edge",
+            Icon = new IconInfo("\uE895") // Sync icon
         });
-
+        // Add consistency check option
+        items.Add(new ListItem(new CheckConsistencyCommand())
+        {
+            Title = "Check Consistency",
+            Subtitle = "View detailed DB vs Edge sync status & find issues",
+            Icon = new IconInfo("\uE9D9") // CheckList/Diagnostic icon
+        });
         if (!favorites.Any())
         {
             items.Add(new ListItem(new NoOpCommand()) 
@@ -73,11 +83,22 @@ internal sealed partial class SearchEdgeFavoritesPage : ListPage
                 subtitle = $"?? {cached.AiDescription}";
             }
 
-            items.Add(new ListItem(new OpenUrlCommand(fav.Url))
+            // Try to get favicon
+            var faviconPath = _faviconService.GetCachedFaviconPath(fav.Url);
+            if (faviconPath == null)
+            {
+                // Queue download for next time
+                _faviconService.QueueFaviconDownload(fav.Url);
+            }
+
+            var item = new ListItem(new OpenUrlCommand(fav.Url))
             {
                 Title = fav.Name,
-                Subtitle = subtitle
-            });
+                Subtitle = subtitle,
+                Icon = DomainIconHelper.GetIconForUrl(fav.Url)
+            };
+
+            items.Add(item);
         }
 
         return items.ToArray();
@@ -182,8 +203,8 @@ internal class SyncFavoritesCommand : InvokableCommand
 
             // Write result to log
             var result = $"\n{DateTime.Now:yyyy-MM-dd HH:mm:ss} - Sync completed!\n" +
-                        $"• Removed from database: {removedFromDb}\n" +
-                        $"• Removed from favorites: {removedFromFavorites}\n\n";
+                        $"â€¢ Removed from database: {removedFromDb}\n" +
+                        $"â€¢ Removed from favorites: {removedFromFavorites}\n\n";
 
             File.AppendAllText(logPath, result);
             File.AppendAllText(logPath, "Check sync.log for full details.\n");
@@ -205,6 +226,75 @@ internal class SyncFavoritesCommand : InvokableCommand
             // Still try to open the log
             try
             {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = logPath,
+                    UseShellExecute = true
+                });
+            }
+            catch { }
+
+            return CommandResult.KeepOpen();
+        }
+    }
+}
+
+internal class CheckConsistencyCommand : InvokableCommand
+{
+    public CheckConsistencyCommand()
+    {
+        Id = "check-consistency";
+        Name = "Check Consistency";
+    }
+
+    public override ICommandResult Invoke()
+    {
+        var logPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SearchEdgeFavorites",
+            "consistency_report.log");
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+
+            var edgeService = new EdgeFavoritesService();
+            var dbService = new DatabaseService();
+            var syncService = new FavoritesSyncService(edgeService, dbService);
+
+            // Run consistency check
+            var report = syncService.CheckConsistency();
+
+            // Write report to file
+            File.WriteAllText(logPath, report);
+
+            // Open the report file
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = logPath,
+                UseShellExecute = true
+            });
+
+            // Also write to sync_result.log for easy access
+            var resultPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "SearchEdgeFavorites",
+                "sync_result.log");
+
+            File.AppendAllText(resultPath, $"\n{'=',-80}\n");
+            File.AppendAllText(resultPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - Consistency Check Completed\n");
+            File.AppendAllText(resultPath, $"{'=',-80}\n");
+            File.AppendAllText(resultPath, "Full report saved to: consistency_report.log\n\n");
+
+            return CommandResult.KeepOpen();
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                File.WriteAllText(logPath, 
+                    $"? ERROR during consistency check:\n{ex.Message}\n\nStack Trace:\n{ex.StackTrace}");
+
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = logPath,

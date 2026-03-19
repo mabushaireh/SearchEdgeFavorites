@@ -48,7 +48,7 @@ public class WebScraperService
         _httpClient.DefaultRequestHeaders.Add("Upgrade-Insecure-Requests", "1");
     }
 
-    public async Task<(string Title, string Content, int? StatusCode)> FetchPageContentAsync(string url)
+    public async Task<(string Title, string Content, int? StatusCode, string FailureReason)> FetchPageContentAsync(string url)
     {
         try
         {
@@ -65,16 +65,18 @@ public class WebScraperService
                     response.StatusCode == HttpStatusCode.Forbidden)
                 {
                     LogMessage($"Authentication required for {url}. Status: {response.StatusCode}");
+                    return (string.Empty, string.Empty, statusCode, $"Authentication required ({response.StatusCode})");
                 }
                 else if (response.StatusCode == HttpStatusCode.NotFound)
                 {
                     LogMessage($"Page not found (404) - marking as dead: {url}");
+                    return (string.Empty, string.Empty, statusCode, string.Empty); // Dead, not permanently failed
                 }
                 else
                 {
                     LogMessage($"HTTP Error {response.StatusCode} for {url}");
+                    return (string.Empty, string.Empty, statusCode, string.Empty); // Temporary error
                 }
-                return (string.Empty, string.Empty, statusCode);
             }
 
             var html = await response.Content.ReadAsStringAsync();
@@ -82,7 +84,7 @@ public class WebScraperService
             if (string.IsNullOrWhiteSpace(html) || html.Length < 100)
             {
                 LogMessage($"Received empty or very short response ({html.Length} chars)");
-                return (string.Empty, string.Empty, statusCode);
+                return (string.Empty, string.Empty, statusCode, string.Empty);
             }
 
             LogMessage($"Successfully fetched {html.Length} characters");
@@ -104,22 +106,30 @@ public class WebScraperService
                 }
             }
 
-            return (result.Title, result.Content, statusCode);
+            return (result.Title, result.Content, statusCode, string.Empty);
         }
         catch (HttpRequestException ex)
         {
             LogMessage($"HTTP Request Exception for {url}: {ex.Message}");
-            return (string.Empty, string.Empty, null);
+            // Check for DNS/network errors that are permanent
+            if (ex.Message.Contains("No such host is known") || 
+                ex.Message.Contains("Name or service not known") ||
+                ex.Message.Contains("nodename nor servname provided") ||
+                ex.Message.Contains("The remote name could not be resolved"))
+            {
+                return (string.Empty, string.Empty, null, $"Network error: {ex.Message}");
+            }
+            return (string.Empty, string.Empty, null, string.Empty);
         }
         catch (TaskCanceledException ex)
         {
             LogMessage($"Request timeout for {url}: {ex.Message}");
-            return (string.Empty, string.Empty, null);
+            return (string.Empty, string.Empty, null, $"Request timeout ({ConfigurationService.Instance.HttpTimeoutSeconds}s)");
         }
         catch (Exception ex)
         {
             LogMessage($"Unexpected error fetching {url}: {ex.GetType().Name} - {ex.Message}");
-            return (string.Empty, string.Empty, null);
+            return (string.Empty, string.Empty, null, string.Empty);
         }
     }
 
@@ -130,10 +140,70 @@ public class WebScraperService
             var doc = new HtmlDocument();
             doc.LoadHtml(html);
 
+            // 1. Extract title (enhanced for Power BI and SPAs)
             var title = doc.DocumentNode.SelectSingleNode("//title")?.InnerText?.Trim() ?? string.Empty;
+
+            // Clean up title - remove common suffixes/prefixes
+            if (!string.IsNullOrEmpty(title))
+            {
+                title = title.Replace(" - Microsoft Power BI", "")
+                            .Replace(" | Microsoft Power BI", "")
+                            .Replace(" - Power BI", "")
+                            .Trim();
+            }
+
             var contentBuilder = new StringBuilder();
 
-            // 1. Extract ALL meta tags for maximum context
+            // 2. Try to extract report/app name from JavaScript variables
+            var scriptTags = doc.DocumentNode.SelectNodes("//script[not(@src)]");
+            if (scriptTags != null)
+            {
+                foreach (var script in scriptTags)
+                {
+                    var scriptContent = script.InnerText;
+                    if (string.IsNullOrEmpty(scriptContent)) continue;
+
+                    // Look for common patterns in JavaScript
+                    var reportNamePatterns = new[]
+                    {
+                        @"reportName[""']?\s*[:=]\s*[""']([^""']+)[""']",
+                        @"displayName[""']?\s*[:=]\s*[""']([^""']+)[""']",
+                        @"title[""']?\s*[:=]\s*[""']([^""']+)[""']",
+                        @"""name""\s*:\s*""([^""]+)""",
+                        @"appName[""']?\s*[:=]\s*[""']([^""']+)[""']",
+                    };
+
+                    foreach (var pattern in reportNamePatterns)
+                    {
+                        var match = System.Text.RegularExpressions.Regex.Match(scriptContent, pattern, 
+                            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+                        if (match.Success && match.Groups.Count > 1)
+                        {
+                            var extractedName = match.Groups[1].Value.Trim();
+                            if (!string.IsNullOrEmpty(extractedName) && 
+                                extractedName.Length > 3 && 
+                                extractedName.Length < 200 &&
+                                !extractedName.Contains("function") &&
+                                !extractedName.Contains("{"))
+                            {
+                                contentBuilder.AppendLine($"Report/App Name: {extractedName}");
+
+                                // Use this as title if current title is empty or generic
+                                if (string.IsNullOrEmpty(title) || 
+                                    title.Equals("Power BI", StringComparison.OrdinalIgnoreCase) ||
+                                    title.Length < 5)
+                                {
+                                    title = extractedName;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Extract ALL meta tags for maximum context
             var metaTags = doc.DocumentNode.SelectNodes("//meta[@name or @property]");
             if (metaTags != null)
             {
@@ -155,14 +225,14 @@ public class WebScraperService
                 }
             }
 
-            // 2. Extract meaningful URL parameters
+            // 4. Extract meaningful URL parameters
             var urlInfo = ExtractUrlContext(url);
             if (!string.IsNullOrEmpty(urlInfo))
             {
                 contentBuilder.AppendLine(urlInfo);
             }
 
-            // 3. Look for noscript content
+            // 5. Look for noscript content
             var noscript = doc.DocumentNode.SelectNodes("//noscript");
             if (noscript != null)
             {
@@ -176,7 +246,7 @@ public class WebScraperService
                 }
             }
 
-            // 4. Extract JSON-LD structured data
+            // 6. Extract JSON-LD structured data
             var jsonLd = doc.DocumentNode.SelectNodes("//script[@type='application/ld+json']");
             if (jsonLd != null)
             {
@@ -190,8 +260,8 @@ public class WebScraperService
                 }
             }
 
-            // 5. Extract data attributes that might contain app info
-            var dataAttributes = doc.DocumentNode.SelectNodes("//*[@data-app-id or @data-app-name or @data-workspace or @data-site-name]");
+            // 7. Extract data attributes that might contain app info
+            var dataAttributes = doc.DocumentNode.SelectNodes("//*[@data-app-id or @data-app-name or @data-workspace or @data-site-name or @data-report-name]");
             if (dataAttributes != null)
             {
                 foreach (var elem in dataAttributes)
@@ -200,13 +270,17 @@ public class WebScraperService
                     {
                         if (attr.Name.StartsWith("data-") && !string.IsNullOrWhiteSpace(attr.Value))
                         {
-                            contentBuilder.AppendLine($"{attr.Name}: {attr.Value}");
+                            // Skip GUIDs - they're not useful for search
+                            if (!Guid.TryParse(attr.Value, out _))
+                            {
+                                contentBuilder.AppendLine($"{attr.Name}: {attr.Value}");
+                            }
                         }
                     }
                 }
             }
 
-            // 6. Look for any visible text in the initial HTML (some SPAs have loading states)
+            // 8. Look for any visible text in the initial HTML (some SPAs have loading states)
             var bodyText = doc.DocumentNode.SelectSingleNode("//body")?.InnerText?.Trim();
             if (!string.IsNullOrWhiteSpace(bodyText))
             {
@@ -226,11 +300,16 @@ public class WebScraperService
                 }
             }
 
-            // 7. Add domain-specific context as fallback
+            // 9. Add domain-specific context as fallback
             if (contentBuilder.Length < 100)
             {
                 var lowerUrl = url.ToLowerInvariant();
-                if (lowerUrl.Contains("powerapps.com"))
+                if (lowerUrl.Contains("powerbi.com"))
+                {
+                    var powerBiContext = ExtractPowerBIContext(url);
+                    contentBuilder.AppendLine(powerBiContext);
+                }
+                else if (lowerUrl.Contains("powerapps.com"))
                 {
                     contentBuilder.AppendLine("Application Type: Microsoft PowerApps - Low-code business application platform");
                 }
@@ -245,6 +324,10 @@ public class WebScraperService
                 else if (lowerUrl.Contains("delve.office.com"))
                 {
                     contentBuilder.AppendLine("Application Type: Microsoft Delve - Office 365 profile and analytics");
+                }
+                else if (lowerUrl.Contains("microsoftstream.com"))
+                {
+                    contentBuilder.AppendLine("Application Type: Microsoft Stream - Enterprise video streaming service");
                 }
                 else
                 {
@@ -309,6 +392,55 @@ public class WebScraperService
         catch
         {
             return string.Empty;
+        }
+    }
+
+    private string ExtractPowerBIContext(string url)
+    {
+        try
+        {
+            var context = new StringBuilder();
+            context.AppendLine("Application Type: Microsoft Power BI - Business intelligence and analytics");
+
+            // Note: The actual report title should be extracted from the HTML <title> tag
+            // which is handled in the parent method. This method provides context only.
+
+            var uri = new Uri(url);
+            var pathSegments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+            // Determine content type from URL structure
+            if (url.Contains("/reports/"))
+            {
+                context.AppendLine("Content Type: Interactive Power BI Report with data visualizations and analytics");
+            }
+            else if (url.Contains("/dashboards/"))
+            {
+                context.AppendLine("Content Type: Power BI Dashboard with business metrics tiles");
+            }
+            else if (url.Contains("/datasets/"))
+            {
+                context.AppendLine("Content Type: Power BI Dataset");
+            }
+            else
+            {
+                context.AppendLine("Content Type: Power BI workspace or app content");
+            }
+
+            // Add workspace context if it's a shared workspace
+            if (url.Contains("/groups/") && !url.Contains("/groups/me/"))
+            {
+                context.AppendLine("Location: Shared workspace (team collaboration)");
+            }
+            else if (url.Contains("/groups/me/"))
+            {
+                context.AppendLine("Location: Personal workspace");
+            }
+
+            return context.ToString();
+        }
+        catch
+        {
+            return "Application Type: Microsoft Power BI - Business intelligence report";
         }
     }
 
