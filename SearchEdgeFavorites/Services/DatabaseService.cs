@@ -41,9 +41,56 @@ public class DatabaseService : IDisposable
                 AiDescription TEXT,
                 PageContent TEXT,
                 LastUpdated TEXT NOT NULL,
-                IsSummarized INTEGER NOT NULL DEFAULT 0
+                IsSummarized INTEGER NOT NULL DEFAULT 0,
+                IsDead INTEGER NOT NULL DEFAULT 0,
+                HttpStatusCode INTEGER
             )";
         createTableCmd.ExecuteNonQuery();
+
+        // Add new columns if they don't exist (for existing databases)
+        try
+        {
+            var alterCmd1 = _connection.CreateCommand();
+            alterCmd1.CommandText = "ALTER TABLE FavoriteCache ADD COLUMN IsDead INTEGER NOT NULL DEFAULT 0";
+            alterCmd1.ExecuteNonQuery();
+        }
+        catch
+        {
+            // Column already exists
+        }
+
+        try
+        {
+            var alterCmd2 = _connection.CreateCommand();
+            alterCmd2.CommandText = "ALTER TABLE FavoriteCache ADD COLUMN HttpStatusCode INTEGER";
+            alterCmd2.ExecuteNonQuery();
+        }
+        catch
+        {
+            // Column already exists
+        }
+
+        try
+        {
+            var alterCmd3 = _connection.CreateCommand();
+            alterCmd3.CommandText = "ALTER TABLE FavoriteCache ADD COLUMN IsPermanentlyFailed INTEGER NOT NULL DEFAULT 0";
+            alterCmd3.ExecuteNonQuery();
+        }
+        catch
+        {
+            // Column already exists
+        }
+
+        try
+        {
+            var alterCmd4 = _connection.CreateCommand();
+            alterCmd4.CommandText = "ALTER TABLE FavoriteCache ADD COLUMN FailureReason TEXT";
+            alterCmd4.ExecuteNonQuery();
+        }
+        catch
+        {
+            // Column already exists
+        }
 
         // Create index on URL for fast lookups
         var createIndexCmd = _connection.CreateCommand();
@@ -60,7 +107,7 @@ public class DatabaseService : IDisposable
 
             var cmd = _connection.CreateCommand();
             cmd.CommandText = @"
-                SELECT Id, Url, Title, AiDescription, PageContent, LastUpdated, IsSummarized 
+                SELECT Id, Url, Title, AiDescription, PageContent, LastUpdated, IsSummarized, IsDead, HttpStatusCode, IsPermanentlyFailed, FailureReason
                 FROM FavoriteCache 
                 WHERE Url = @url";
             cmd.Parameters.AddWithValue("@url", url);
@@ -76,7 +123,11 @@ public class DatabaseService : IDisposable
                     AiDescription = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
                     PageContent = reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
                     LastUpdated = DateTime.Parse(reader.GetString(5)),
-                    IsSummarized = reader.GetInt32(6) == 1
+                    IsSummarized = reader.GetInt32(6) == 1,
+                    IsDead = reader.IsDBNull(7) ? false : reader.GetInt32(7) == 1,
+                    HttpStatusCode = reader.IsDBNull(8) ? null : reader.GetInt32(8),
+                    IsPermanentlyFailed = reader.IsDBNull(9) ? false : reader.GetInt32(9) == 1,
+                    FailureReason = reader.IsDBNull(10) ? string.Empty : reader.GetString(10)
                 };
             }
         }
@@ -96,14 +147,18 @@ public class DatabaseService : IDisposable
 
             var cmd = _connection.CreateCommand();
             cmd.CommandText = @"
-                INSERT INTO FavoriteCache (Url, Title, AiDescription, PageContent, LastUpdated, IsSummarized)
-                VALUES (@url, @title, @description, @content, @updated, @summarized)
+                INSERT INTO FavoriteCache (Url, Title, AiDescription, PageContent, LastUpdated, IsSummarized, IsDead, HttpStatusCode, IsPermanentlyFailed, FailureReason)
+                VALUES (@url, @title, @description, @content, @updated, @summarized, @dead, @statusCode, @permanentlyFailed, @failureReason)
                 ON CONFLICT(Url) DO UPDATE SET
                     Title = @title,
                     AiDescription = @description,
                     PageContent = @content,
                     LastUpdated = @updated,
-                    IsSummarized = @summarized";
+                    IsSummarized = @summarized,
+                    IsDead = @dead,
+                    HttpStatusCode = @statusCode,
+                    IsPermanentlyFailed = @permanentlyFailed,
+                    FailureReason = @failureReason";
 
             cmd.Parameters.AddWithValue("@url", cache.Url);
             cmd.Parameters.AddWithValue("@title", cache.Title);
@@ -111,6 +166,10 @@ public class DatabaseService : IDisposable
             cmd.Parameters.AddWithValue("@content", cache.PageContent ?? string.Empty);
             cmd.Parameters.AddWithValue("@updated", cache.LastUpdated.ToString("o"));
             cmd.Parameters.AddWithValue("@summarized", cache.IsSummarized ? 1 : 0);
+            cmd.Parameters.AddWithValue("@dead", cache.IsDead ? 1 : 0);
+            cmd.Parameters.AddWithValue("@statusCode", cache.HttpStatusCode.HasValue ? (object)cache.HttpStatusCode.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("@permanentlyFailed", cache.IsPermanentlyFailed ? 1 : 0);
+            cmd.Parameters.AddWithValue("@failureReason", cache.FailureReason ?? string.Empty);
 
             cmd.ExecuteNonQuery();
         }
@@ -131,7 +190,7 @@ public class DatabaseService : IDisposable
             cmd.CommandText = @"
                 SELECT Url 
                 FROM FavoriteCache 
-                WHERE IsSummarized = 0 
+                WHERE IsSummarized = 0 AND IsDead = 0 AND IsPermanentlyFailed = 0
                 LIMIT @limit";
             cmd.Parameters.AddWithValue("@limit", limit);
 
@@ -147,6 +206,11 @@ public class DatabaseService : IDisposable
         }
 
         return urls;
+    }
+
+    public SqliteCommand? CreateCommand()
+    {
+        return _connection?.CreateCommand();
     }
 
     public void Dispose()

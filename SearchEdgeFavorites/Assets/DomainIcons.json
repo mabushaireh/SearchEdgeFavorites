@@ -1,0 +1,231 @@
+{
+  "domains": [
+    {
+      "pattern": "powerbi.com",
+      "icon": "\uE9D2",
+      "description": "Power BI - Chart icon"
+    },
+    {
+      "pattern": "portal.azure.com",
+      "icon": "\uE753",
+      "description": "Azure Portal - Cloud icon"
+    },
+    {
+      "pattern": "azure.com",
+      "icon": "\uE753",
+      "description": "Azure - Cloud icon"
+    },
+    {
+      "pattern": "sharepoint.com",
+      "icon": "\uECAF",
+      "description": "SharePoint"
+    },
+    {
+      "pattern": "teams.microsoft.com",
+      "icon": "\uE902",
+      "description": "Teams"
+    },
+    {
+      "pattern": "outlook.com",
+      "icon": "\uE715",
+      "description": "Outlook - Mail icon"
+    },
+    {
+      "pattern": "office.com",
+      "icon": "\uE715",
+      "description": "Office - Mail icon"
+    },
+    {
+      "pattern": "microsoftstream.com",
+      "icon": "\uE93E",
+      "description": "Stream - Video icon"
+    },
+    {
+      "pattern": "stream.microsoft.com",
+      "icon": "\uE93E",
+      "description": "Stream - Video icon"
+    },
+    {
+      "pattern": "dev.azure.com",
+      "icon": "\uE90F",
+      "description": "Azure DevOps"
+    },
+    {
+      "pattern": "visualstudio.com",
+      "icon": "\uE90F",
+      "description": "Visual Studio"
+    },
+    {
+      "pattern": "docs.microsoft.com",
+      "icon": "\uE736",
+      "description": "Microsoft Docs - Education icon"
+    },
+    {
+      "pattern": "learn.microsoft.com",
+      "icon": "\uE736",
+      "description": "Microsoft Learn"
+    },
+    {
+      "pattern": "github.com",
+      "icon": "\uE8A7",
+      "description": "GitHub - Code icon"
+    },
+    {
+      "pattern": "dynamics.com",
+      "icon": "\uE8B7",
+      "description": "Dynamics - CRM"
+    },
+    {
+      "pattern": "crm.dynamics.com",
+      "icon": "\uE8B7",
+      "description": "Dynamics CRM"
+    },
+    {
+      "pattern": "onenote.com",
+      "icon": "\uE70B",
+      "description": "OneNote - Page icon"
+    },
+    {
+      "pattern": "onedrive.com",
+      "icon": "\uE753",
+      "description": "OneDrive - Folder icon"
+    },
+    {
+      "pattern": "stackoverflow.com",
+      "icon": "\uE897",
+      "description": "Stack Overflow - Help icon"
+    },
+    {
+      "pattern": "stackexchange.com",
+      "icon": "\uE897",
+      "description": "Stack Exchange - Help icon"
+    },
+    {
+      "pattern": "wikipedia.org",
+      "icon": "\uE8A5",
+      "description": "Wikipedia - Library icon"
+    },
+    {
+      "pattern": "youtube.com",
+      "icon": "\uE714",
+      "description": "YouTube - Video icon"
+    },
+    {
+      "pattern": "youtu.be",
+      "icon": "\uE714",
+      "description": "YouTube short link"
+    },
+    {
+      "pattern": "linkedin.com",
+      "icon": "\uE77B",
+      "description": "LinkedIn - Contact icon"
+    },
+    {
+      "pattern": "twitter.com",
+      "icon": "\uE8BD",
+      "description": "Twitter - Message icon"
+    },
+    {
+      "pattern": "x.com",
+      "icon": "\uE8BD",
+      "description": "X (Twitter) - Message icon"
+    },
+    {
+      "pattern": "reddit.com",
+      "icon": "\uE8F1",
+      "description": "Reddit - Forum icon"
+    },
+    {
+      "pattern": "google.com",
+      "icon": "\uE721",
+      "description": "Google - Search icon"
+    },
+    {
+      "pattern": "gmail.com",
+      "icon": "\uE715",
+      "description": "Gmail - Mail icon"
+    },
+    {
+      "pattern": "drive.google.com",
+      "icon": "\uE8B7",
+      "description": "Google Drive - Folder icon"
+    },
+    {
+      "pattern": "notion.so",
+      "icon": "\uE70F",
+      "description": "Notion - Edit icon"
+    },
+    {
+      "pattern": "notion.com",
+      "icon": "\uE70F",
+      "description": "Notion - Edit icon"
+    },
+    {
+      "pattern": "figma.com",
+      "icon": "\uE771",
+      "description": "Figma - Design icon"
+    },
+    {
+      "pattern": "atlassian.net",
+      "icon": "\uE8FD",
+      "description": "Atlassian - List icon"
+    },
+    {
+      "pattern": "confluence",
+      "icon": "\uE8A5",
+      "description": "Confluence - Document icon"
+    },
+    {
+      "pattern": "jira",
+      "icon": "\uE8FD",
+      "description": "Jira - List icon"
+    },
+    {
+      "pattern": "slack.com",
+      "icon": "\uE8BD",
+      "description": "Slack - Chat icon"
+    },
+    {
+      "pattern": "zoom.us",
+      "icon": "\uE8AA",
+      "description": "Zoom - Video icon"
+    },
+    {
+      "pattern": "oanda.com",
+      "icon": "\uE8D4",
+      "description": "Oanda - Money/Calculator icon"
+    },
+    {
+      "pattern": "forex",
+      "icon": "\uE8D4",
+      "description": "Forex - Money icon"
+    },
+    {
+      "pattern": "trading",
+      "icon": "\uE8D4",
+      "description": "Trading - Money icon"
+    },
+    {
+      "pattern": "finance",
+      "icon": "\uE8D4",
+      "description": "Finance - Money icon"
+    },
+    {
+      "pattern": "microsoft.com",
+      "icon": "\uE737",
+      "description": "Microsoft - Corporate icon"
+    },
+    {
+      "pattern": "msft.com",
+      "icon": "\uE737",
+      "description": "Microsoft internal"
+    },
+    {
+      "pattern": ".ms",
+      "icon": "\uE737",
+      "description": "Microsoft short domains"
+    }
+  ],
+  "defaultIcon": "\uE774",
+  "defaultDescription": "Web - Globe icon"
+}
