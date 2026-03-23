@@ -131,6 +131,12 @@ public class FavoritesSyncService
             }
             log.AppendLine($"Total orphaned entries removed: {orphanedCount}");
 
+            // Step 7: Update Path for existing records that have empty paths
+            log.AppendLine();
+            log.AppendLine("--- Updating Folder Paths for Existing Records ---");
+            var updatedPaths = UpdateMissingPaths(currentFavorites, log);
+            log.AppendLine($"Total paths updated: {updatedPaths}");
+
             // Final counts
             var finalFavorites = _edgeFavoritesService.GetFavorites();
             var finalDbUrls = GetAllCachedUrls();
@@ -243,6 +249,87 @@ public class FavoritesSyncService
         }
 
         return urls;
+    }
+
+    private int UpdateMissingPaths(List<Favorite> currentFavorites, System.Text.StringBuilder log)
+    {
+        var updatedCount = 0;
+        try
+        {
+            // Create a dictionary of URL -> Path from current favorites
+            var urlToPath = new Dictionary<string, string>();
+            foreach (var fav in currentFavorites)
+            {
+                if (!string.IsNullOrEmpty(fav.Url) && !string.IsNullOrEmpty(fav.Path))
+                {
+                    urlToPath[fav.Url] = fav.Path;
+                }
+            }
+
+            // Get all records with empty paths from database
+            var cmd = _databaseService.CreateCommand();
+            if (cmd == null)
+            {
+                LogToDebug("UpdateMissingPaths: Database command is null");
+                return 0;
+            }
+
+            cmd.CommandText = "SELECT Url FROM FavoriteCache WHERE Path IS NULL OR Path = ''";
+
+            var urlsToUpdate = new List<string>();
+            using (var reader = cmd.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    urlsToUpdate.Add(reader.GetString(0));
+                }
+            }
+
+            LogToDebug($"Found {urlsToUpdate.Count} records with missing paths");
+            log.AppendLine($"  Found {urlsToUpdate.Count} records with missing paths");
+
+            // Update each URL with its correct path if found in Edge bookmarks
+            foreach (var url in urlsToUpdate)
+            {
+                if (urlToPath.TryGetValue(url, out var path))
+                {
+                    var updateCmd = _databaseService.CreateCommand();
+                    if (updateCmd != null)
+                    {
+                        updateCmd.CommandText = "UPDATE FavoriteCache SET Path = @path WHERE Url = @url";
+                        updateCmd.Parameters.AddWithValue("@path", path);
+                        updateCmd.Parameters.AddWithValue("@url", url);
+
+                        var rowsAffected = updateCmd.ExecuteNonQuery();
+                        if (rowsAffected > 0)
+                        {
+                            updatedCount++;
+                            LogToDebug($"Updated path for: {url} -> {path}");
+                        }
+                    }
+                }
+            }
+
+            if (updatedCount > 0)
+            {
+                log.AppendLine($"  ✓ Updated {updatedCount} records with folder paths");
+            }
+            else if (urlsToUpdate.Count > 0)
+            {
+                log.AppendLine($"  ⚠ No paths could be updated (URLs may not exist in Edge bookmarks)");
+            }
+            else
+            {
+                log.AppendLine($"  ✓ All records already have folder paths");
+            }
+        }
+        catch (Exception ex)
+        {
+            LogToDebug($"Error in UpdateMissingPaths: {ex.Message}");
+            log.AppendLine($"  ⚠ Error updating paths: {ex.Message}");
+        }
+
+        return updatedCount;
     }
 
     private List<(string Url, int StatusCode)> GetDeadUrls()
